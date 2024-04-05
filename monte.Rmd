@@ -1,0 +1,220 @@
+---
+title: "Correlation Analysis using Monte Carlo Hypothesis Test"
+author: "Jingyan Zhang"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(usmap)
+```
+
+# Prepare the original data
+
+```{r}
+shooting = read.csv("shooting.csv")
+code = read.csv("codebook.csv")
+shooting = na.omit(shooting)
+shooting = select(shooting, -Sources)
+colnames(shooting) <- tolower(gsub("[^[:alnum:]_]", " ", colnames(shooting)))
+colnames(shooting) <- gsub("[.]", "_", colnames(shooting))
+shooting$date <- as.character(shooting$date)
+modify_date <- function(date) {
+  parts <- strsplit(date, "/")[[1]]
+  if (length(parts) == 3) {
+    if (parts[2] == "Unknown") {
+      return(paste(parts[1], "XX", parts[3], sep="/"))
+    } else {
+      return(date)
+    }
+  } else {
+    return(date)
+  }
+}
+
+shooting$date <- sapply(shooting$date, modify_date)
+cols_to_factor <- names(shooting)[sapply(shooting, is.character)]
+shooting[cols_to_factor] <- lapply(shooting[cols_to_factor], as.factor)
+```
+
+
+# Use Monte Carlo Hypothesis Test on Generated Different Distribution
+
+
+## Function: Linearity Test
+Test the linearity between two data sets, return the p-value for linearity. 
+```{r}
+# Perform Monte Carlo hypothesis test to assess linearity
+# Define null hypothesis: No linear relationship
+# Alternative hypothesis: Linear relationship
+
+linear_monte_carlo <- function(x,y){
+
+n_simulations <- 1000
+data_df <- data.frame(x=x,y=y)
+# Initialize a vector to store simulated correlation coefficients
+simulated_correlations <- numeric(n_simulations)
+
+# Observed correlation coefficient
+observed_correlation <- cor(data_df$x, data_df$y, method = "pearson")
+
+# Perform Monte Carlo simulations
+for (i in 1:n_simulations) {
+  shuffled_data <- data_df %>%
+    mutate(y = sample(y))
+  
+  # Calculate the correlation coefficient for the shuffled data
+  simulated_correlation <- cor(shuffled_data$x, shuffled_data$y, method = "pearson")
+  
+  # Store the simulated correlation coefficient
+  simulated_correlations[i] <- simulated_correlation
+}
+
+# Calculate the two-tailed p-value
+p_value <- mean(abs(simulated_correlations) >= abs(observed_correlation))
+return(p_value)
+}
+```
+
+## Function: Plot the p-value
+
+```{r}
+plot_p <- function(results){
+  plot(1:nrow(results), results$p_value, type = "l", ylab = "P-value", xlab = "Simulation Run")
+  abline(h = 0.05, col = "red", lty = 2)
+}
+```
+
+
+
+## Normal Distribution v.s. Normal Distribution
+```{r}
+# Set a random seed for reproducibility
+set.seed(123)
+
+# Generate two datasets
+k = 100
+Group_A <- rnorm(k, mean = 0, sd = 1)
+means = seq(from = -1, to = 1, length.out = 10)
+sds = seq(from = 0.1, to = 2, length.out = 10)
+results <- expand.grid(mean = means, sd = sds)
+results$p_value <- NA # Initialize a column for p-values
+
+for (i in 1:nrow(results)) {
+    Group_B <- rnorm(k, mean = results$mean[i], sd = results$sd[i])
+    results$p_value[i] <- linear_monte_carlo(Group_A, Group_B)
+}
+plot_p(results)
+```
+
+```{r}
+results[results$p_value<=0.05,]
+```
+
+
+
+## Normal Distribution v.s. Skewed Distribution
+
+
+### Right-skewed 
+```{r}
+set.seed(123)
+for (i in 1:nrow(results)) {
+    Group_B <- rlnorm(k, mean = results$mean[i], sd = results$sd[i])
+    results$p_value[i] <- linear_monte_carlo(Group_A, Group_B)
+}
+plot_p(results)
+```
+```{r}
+results[results$p_value<=0.05,]
+```
+
+
+ 
+## Normal Distribution v.s. Exponential Distribution
+
+```{r}
+set.seed(123)
+Group_A <- rnorm(k, mean = 0, sd = 1)
+lambda = seq(from = 0.1, to = 2, length.out = 100)
+results <- expand.grid(lambda = lambda)
+results$p_value <- NA # Initialize a column for p-values
+
+for (i in 1:nrow(results)) {
+    Group_B <- rexp(k, rate = lambda)
+    results$p_value[i] <- linear_monte_carlo(Group_A, Group_B)
+}
+plot_p(results)
+```
+```{r}
+results[results$p_value<=0.05,]
+```
+
+ 
+## Uniform Distribution v.s. Uniform Distribution
+
+```{r}
+set.seed(123)
+Group_A <- runif(k, min = 3, max = 7)
+
+mins = seq(from = 1, to = 5, length.out = 10)
+maxs = seq(from = 5, to = 10, length.out = 10)
+results <- expand.grid(min = mins, max = maxs)
+results$p_value <- NA # Initialize a column for p-values
+
+for (i in 1:nrow(results)) {
+    Group_B <- runif(k, results$min[i], results$max[i])
+    if (sd(Group_B) == 0) {
+        # Handle the case where the standard deviation is zero (e.g., skip or assign NA)
+        results$p_value[i] <- NA
+    } else {
+        results$p_value[i] <- linear_monte_carlo(Group_A, Group_B)
+    }
+}
+plot_p(results)
+```
+```{r}
+results[results$p_value<=0.05,]
+```
+
+
+The method works fine when comparing uniform distribution.
+
+
+
+# Analysis
+
+```{r}
+results_df <- data.frame(
+  Predictor = character(0),  
+  P_Value = numeric(0)       
+)
+
+for (i in 1:ncol(num_shooting)) {
+  predictor_name <- colnames(num_shooting)[i]  # Get the predictor's name
+  p_value <- linear_monte_carlo(shooting$`total injured killed victims`, num_shooting[, i])
+  results_df <- rbind(results_df, data.frame(Predictor = predictor_name, P_Value = p_value))
+}
+
+print(results_df)
+```
+
+```{r}
+cor(shooting$`shooter age`, shooting$`total injured killed victims`)
+```
+
+
+```{r}
+plot(shooting$`reliability score  1 5 `, shooting$`total injured killed victims`)
+abline(lm(`total injured killed victims`~`reliability score  1 5 `, data = shooting), col = "red")
+```
+
+
+```{r}
+plot(shooting$`shooter age`, shooting$`total injured killed victims`)
+abline(lm(`total injured killed victims`~`shooter age`, data = shooting), col = "red")
+```
+
+

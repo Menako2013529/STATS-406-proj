@@ -1,0 +1,166 @@
+---
+title: "Untitled"
+author: "Jingyan Zhang"
+date: "2023-10-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(dplyr)
+library(ggplot2)
+library(usmap)
+```
+
+```{r}
+shooting = read.csv("shooting.csv")
+code = read.csv("codebook.csv")
+shooting = na.omit(shooting)
+shooting = select(shooting, -Sources)
+colnames(shooting) <- tolower(gsub("[^[:alnum:]_]", " ", colnames(shooting)))
+colnames(shooting) <- gsub("[.]", "_", colnames(shooting))
+shooting$date <- as.character(shooting$date)
+modify_date <- function(date) {
+  parts <- strsplit(date, "/")[[1]]
+  if (length(parts) == 3) {
+    if (parts[2] == "Unknown") {
+      return(paste(parts[1], "XX", parts[3], sep="/"))
+    } else {
+      return(date)
+    }
+  } else {
+    return(date)
+  }
+}
+
+shooting$date <- sapply(shooting$date, modify_date)
+cols_to_factor <- names(shooting)[sapply(shooting, is.character)]
+shooting[cols_to_factor] <- lapply(shooting[cols_to_factor], as.factor)
+summary(shooting)
+```
+
+```{r}
+col_num = shooting[, sapply(shooting, is.numeric)]
+round(cor(col_num), digits = 2)
+```
+
+
+
+```{r}
+pairs(col_num[c("shooter age", "victim s age s ")],
+main = "Scatter plot", pch = 21, bg = "light blue")
+```
+
+```{r}
+
+shooting_counts <- table(tolower(shooting$state))
+shooting_df <- data.frame(state = names(shooting_counts), Freq = as.numeric(shooting_counts))
+
+plot_usmap(data = shooting_df, values = "Freq", labels = TRUE) +
+  scale_fill_gradientn(
+    colours = hcl.colors(10), na.value = "grey90",
+    guide = guide_colourbar(
+      barwidth = 25, barheight = 0.4,
+      title.position = "top" 
+    )
+  ) +
+  labs(fill = "Number of Shootings") +
+  theme(legend.position = "bottom")
+
+```
+
+
+```{r}
+# Load necessary library
+library(dplyr)
+
+# Assuming 'your_data' is your main dataset and 'zip_to_state' is your ZIP code to state mapping dataset
+# Read the ZIP code to state mapping dataset
+zip_to_state <- read.csv("uszips.csv")
+social_high <- read.csv("social_capital_high_school.csv")
+# Merge your data with the ZIP code to state mapping
+merged_data <- merge(social_high, zip_to_state, by = "zip")
+
+# Now 'merged_data' will contain a 'state' column corresponding to each ZIP code
+merged_data$stated_id <- as.factor(merged_data$state_id)
+summary(merged_data)
+```
+
+```{r}
+boxplot(ec_own_ses_hs~state_id, merged_data)
+```
+
+```{r}
+merged_data$state <- merged_data$state_id
+merged_data <- merge(shooting, merged_data, by = "state")
+shooting_eco <- merged_data[, c("ec_own_ses_hs", "killed  includes shooter ")]
+```
+
+
+
+```{r}
+set.seed(123)
+# Assume 'actual_data' is your observed data, and 'killed' is the number of people killed in each event
+observed_mean <- mean(shooting$`total injured killed victims`)
+
+# Null hypothesis mean
+mu_0 <- 1
+
+# Number of simulations
+n_simulations <- 10000
+
+# Simulate data under the null hypothesis
+simulated_means <- replicate(n_simulations, {
+  simulated_data <- rpois(n = length(shooting$`total injured killed victims`), lambda = mu_0)
+  mean(simulated_data)
+})
+
+# Calculate the empirical p-value
+p_value <- mean(simulated_means >= observed_mean)
+
+# Print the p-value
+print(p_value)
+
+# Decision
+if (p_value < 0.05) {
+  print("Reject the null hypothesis: The mean is significantly different from 1")
+} else {
+  print("Do not reject the null hypothesis: No significant difference from 1")
+}
+```
+
+
+```{r}
+# Parameters for the normal distribution
+mu_0 <- 1  # mean
+sigma <- 0.5  # standard deviation, adjust based on your data
+
+# Simulate data under the null hypothesis using normal distribution
+simulated_means_normal <- replicate(n_simulations, {
+  simulated_data <- rnorm(n = length(shooting$`total injured killed victims`), mean = mu_0, sd = sigma)
+  mean(simulated_data)
+})
+# Parameters for the exponential distribution
+lambda <- 1  # rate parameter, adjust based on your data
+
+# Simulate data under the null hypothesis using exponential distribution
+simulated_means_exponential <- replicate(n_simulations, {
+  simulated_data <- rexp(n = length(shooting$`total injured killed victims`), rate = lambda)
+  mean(simulated_data)
+})
+# Calculate the empirical p-value for normal distribution
+p_value_normal <- mean(simulated_means_normal >= observed_mean)
+
+# Calculate the empirical p-value for exponential distribution
+p_value_exponential <- mean(simulated_means_exponential >= observed_mean)
+
+# Print the p-values
+print(paste("P-value for normal distribution:", p_value_normal))
+print(paste("P-value for exponential distribution:", p_value_exponential))
+
+# Decision making based on p-values
+
+```
+
+
+
